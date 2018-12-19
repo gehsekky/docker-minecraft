@@ -1,0 +1,45 @@
+#!/bin/bash
+
+echo "docker-minecraft - '$(id -un):$(id -gn)'"
+
+EULA=${EULA:-false}
+MINECRAFT_HOME="/opt/minecraft"
+MINECRAFT_VERSION=${MINECRAFT_VERSION:-1.13.1}
+TEMP_DIR="/temp"
+
+build_spigot() {
+    echo "building spigot " + $MINECRAFT_VERSION
+    mkdir $TEMP_DIR
+    cd $TEMP_DIR || exit
+    wget -O BuildTools.jar https://hub.spigotmc.org/jenkins/job/BuildTools/lastSuccessfulBuild/artifact/target/BuildTools.jar && \
+    java -jar BuildTools.jar --rev "$MINECRAFT_VERSION" && \
+    cp spigot-*.jar $MINECRAFT_HOME/spigot.jar && \
+    cp craftbukkit-* $MINECRAFT_HOME/craftbukkit.jar
+}
+
+write_eula() {
+    echo "writing eula"
+    cd $MINECRAFT_HOME/ || exit
+    echo "eula=$EULA" > $MINECRAFT_HOME/eula.txt
+}
+
+cleanup() {
+    echo "cleaning up" && \
+    rm -rf $TEMP_DIR
+}
+
+echo 'executing script'
+
+mkdir /opt && mkdir $MINECRAFT_HOME
+cp /server.properties $MINECRAFT_HOME
+echo $DEFAULT_OP > $MINECRAFT_HOME/ops.txt
+
+if [ ! -f $MINECRAFT_HOME/spigot.jar ]; then
+    build_spigot && \
+    cleanup
+fi
+
+write_eula
+
+echo "starting up spigot server"
+java -Xmx1024M -Xms1024M -jar $MINECRAFT_HOME/spigot.jar

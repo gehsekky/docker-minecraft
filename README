@@ -1,0 +1,5 @@
+# commands
+docker build -t docker-minecraft .
+docker system prune
+docker run -d -p 25565:25565 -v "C:/Users/andy/Downloads/docker-minecraft-data:/opt/minecraft" --name mc docker-minecraft
+docker logs --follow mc
