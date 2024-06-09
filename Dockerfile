@@ -1,7 +1,8 @@
-FROM openjdk:19-jdk-alpine3.15
+FROM eclipse-temurin:22-jre
 
 # install necessary libs
-RUN apk add -U \
+RUN apt-get update && \
+    apt-get install -y \
     bash \
     dos2unix \
     git \
@@ -20,4 +21,4 @@ EXPOSE 25565
 
 ENTRYPOINT [ "/docker-minecraft" ]
 
-ENV EULA=true MINECRAFT_VERSION=1.18.2
+ENV EULA=true MINECRAFT_VERSION=1.20.6

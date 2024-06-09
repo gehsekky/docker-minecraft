@@ -8,7 +8,7 @@ MINECRAFT_VERSION=${MINECRAFT_VERSION}
 TEMP_DIR="/temp"
 
 get_paper() {
-    echo "building paper $MINECRAFT_VERSION"
+    echo "fetching paper $MINECRAFT_VERSION"
     mkdir $TEMP_DIR
     cd $TEMP_DIR || exit
     BUILD_NUMBER=$(curl -X 'GET' "https://papermc.io/api/v2/projects/paper/versions/${MINECRAFT_VERSION}" -H 'accept: application/json' | jq '.builds | last')
