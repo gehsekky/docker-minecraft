@@ -16,6 +16,7 @@ USER_AGENT=${USER_AGENT:-"docker-minecraft/1.0 (https://github.com/gehsekky/dock
 PAPER_API="https://fill.papermc.io/v3/projects/paper"
 TEMP_DIR="$MINECRAFT_HOME/temp"
 VERSION_FILE="$MINECRAFT_HOME/.paper-version"
+BACKUP_DIR="$MINECRAFT_HOME/backups"
 
 get_paper() {
     echo "fetching paper $MINECRAFT_VERSION"
@@ -51,9 +52,29 @@ get_paper() {
             || { echo "ERROR: paper.jar checksum mismatch" >&2; exit 1; }
     fi
 
+    # only after the download checks out, so a bad version can't pile up backups in a restart loop
+    backup_data
+
     # same filesystem as the data volume, so a failed update can't leave a partial jar
     mv paper.jar "$MINECRAFT_HOME/paper.jar"
     echo "$MINECRAFT_VERSION" > "$VERSION_FILE"
+}
+
+# snapshot the data volume before replacing paper.jar. keeps the old jar and version record
+# so a restore is a full rollback; skips what the server can download again.
+backup_data() {
+    [ -f "$MINECRAFT_HOME/paper.jar" ] || return 0
+
+    local installed="unknown" dest
+    [ -f "$VERSION_FILE" ] && installed=$(cat "$VERSION_FILE")
+    dest="$BACKUP_DIR/pre-${MINECRAFT_VERSION}-from-${installed}-$(date -u +%Y%m%dT%H%M%SZ).tar.gz"
+
+    echo "backing up to $dest"
+    mkdir -p "$BACKUP_DIR"
+    tar -czf "$TEMP_DIR/backup.tar.gz" -C "$MINECRAFT_HOME" \
+        --exclude=./backups --exclude=./temp --exclude=./cache \
+        --exclude=./libraries --exclude=./versions --exclude=./logs .
+    mv "$TEMP_DIR/backup.tar.gz" "$dest"
 }
 
 # true if going from version $1 to $2 moves backwards (pre-release suffixes are ignored)

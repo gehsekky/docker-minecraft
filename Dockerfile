@@ -28,4 +28,9 @@ EXPOSE 25565
 
 USER mcuser
 
+# healthy once the server accepts connections; the long start period covers the first
+# run's download and world generation.
+HEALTHCHECK --interval=30s --timeout=5s --start-period=5m --start-interval=5s --retries=3 \
+    CMD bash -c '</dev/tcp/localhost/25565'
+
 ENTRYPOINT [ "/docker-minecraft" ]

@@ -36,6 +36,9 @@ docker compose logs --follow
 ```
 
 * the world and all other server data live in `./docker-minecraft-data`. set `MINECRAFT_DATA` in `.env` to keep them somewhere else.
+* the container is limited to `MEMORY_LIMIT` (default `4G`). if you raise `JAVA_MEMORY`, keep the limit about 2G above it or the server can get killed for running out of memory.
+* `docker compose ps` shows the server as `healthy` once it accepts connections.
+* on a Linux host the container user (uid 1001) needs write access to the data folder: `sudo chown -R 1001:1001 docker-minecraft-data`.
 
 * stop: `docker compose stop`
 * start a stopped instance: `docker compose start`
@@ -53,3 +56,31 @@ docker logs --follow mc
 * start a stopped instance: `docker start mc`
 
 at this point you can start up the minecraft client, connect to a local network, and see the server.
+
+### backups
+
+changing `MINECRAFT_VERSION` automatically saves a backup to `backups/` in the data folder before the new version is installed. these aren't deleted automatically, so clear out old ones once you're happy with an upgrade.
+
+to back up by hand, stop the server first so the world is fully saved. keep the backup outside the data folder:
+
+```shell
+docker compose stop
+tar -czf minecraft-backup.tar.gz -C docker-minecraft-data --exclude=./backups --exclude=./cache --exclude=./libraries --exclude=./versions --exclude=./logs .
+docker compose start
+```
+
+to restore, set aside the current data, extract the backup, and make sure `MINECRAFT_VERSION` matches the version in the backup (the name of an automatic backup says `from-<version>`):
+
+```shell
+docker compose stop
+mv docker-minecraft-data docker-minecraft-data.old
+mkdir docker-minecraft-data
+tar -xzf minecraft-backup.tar.gz -C docker-minecraft-data
+docker compose start
+```
+
+if you changed `MINECRAFT_VERSION` in `.env`, use `docker compose up -d` instead of `start`. once the restored world looks right, delete `docker-minecraft-data.old`.
+
+### testing
+
+`bash test/smoke.sh` builds the image, starts a real server on port 25599 with temporary storage, and checks that it comes up healthy, saves on stop, and restarts. CI runs this along with `shellcheck` on every push to `master`.

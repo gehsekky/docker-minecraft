@@ -6,3 +6,5 @@ docker-minecraft-data
 .env
 .env.example
 .gitignore
+.github
+test

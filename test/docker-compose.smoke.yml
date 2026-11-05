@@ -1,0 +1,10 @@
+# overrides for test/smoke.sh, so it can run alongside a real server
+services:
+  minecraft:
+    container_name: mc-smoke
+    ports: !override
+      - "25599:25565"
+    restart: "no"
+
+volumes:
+  mc-smoke-data:
