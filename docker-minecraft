@@ -1,49 +1,213 @@
 #!/bin/bash
+set -euo pipefail
 
 echo "docker-minecraft - '$(id -un):$(id -gn)'"
 
 EULA=${EULA:-false}
 MINECRAFT_HOME="/opt/minecraft"
-MINECRAFT_VERSION=${MINECRAFT_VERSION}
-TEMP_DIR="/temp"
+MINECRAFT_VERSION=${MINECRAFT_VERSION:-}
+JAVA_MEMORY=${JAVA_MEMORY:-2G}
+OPS=${OPS:-}
+OP_LEVEL=${OP_LEVEL:-4}
+USE_AIKARS_FLAGS=${USE_AIKARS_FLAGS:-true}
+ALLOW_DOWNGRADE=${ALLOW_DOWNGRADE:-false}
+# Fill (v3) requires a non-generic User-Agent identifying the software + a contact.
+USER_AGENT=${USER_AGENT:-"docker-minecraft/1.0 (https://github.com/gehsekky/docker-minecraft)"}
+PAPER_API="https://fill.papermc.io/v3/projects/paper"
+TEMP_DIR="$MINECRAFT_HOME/temp"
+VERSION_FILE="$MINECRAFT_HOME/.paper-version"
 
 get_paper() {
     echo "fetching paper $MINECRAFT_VERSION"
-    if [ ! -d "$TEMP_DIR" ]; then
-        mkdir $TEMP_DIR
+    mkdir -p "$TEMP_DIR"
+    cd "$TEMP_DIR"
+
+    local builds build url sha
+    builds=$(curl -fsSL -A "$USER_AGENT" "${PAPER_API}/versions/${MINECRAFT_VERSION}/builds")
+
+    # newest STABLE build, falling back to the newest build overall
+    # (a brand-new version may only have ALPHA/BETA builds for a while)
+    build=$(echo "$builds" | jq -c 'sort_by(.id) | (map(select(.channel == "STABLE")) | last) // last')
+    if [ -z "$build" ] || [ "$build" = "null" ]; then
+        echo "ERROR: no Paper builds found for version '$MINECRAFT_VERSION'" >&2
+        exit 1
     fi
-    cd $TEMP_DIR
-    BUILD_NUMBER=$(curl -s https://api.papermc.io/v2/projects/paper/versions/${MINECRAFT_VERSION}/builds | \
-        jq -r '.builds | map(select(.channel == "default") | .build) | .[-1]')
+
+    BUILD_NUMBER=$(echo "$build" | jq -r '.id')
+    url=$(echo "$build" | jq -r '.downloads["server:default"].url // empty')
+    sha=$(echo "$build" | jq -r '.downloads["server:default"].checksums.sha256 // empty' | tr '[:upper:]' '[:lower:]')
     echo "BUILD_NUMBER=$BUILD_NUMBER"
-    JAR_NAME=paper-${MINECRAFT_VERSION}-${BUILD_NUMBER}.jar
-    PAPERMC_URL="https://api.papermc.io/v2/projects/paper/versions/${MINECRAFT_VERSION}/builds/${BUILD_NUMBER}/downloads/${JAR_NAME}"
-    echo "PAPERMC_URL=$PAPERMC_URL"
-    curl -o paper.jar $PAPERMC_URL && \
-        cp paper.jar $MINECRAFT_HOME/paper.jar
+    echo "download URL=$url"
+    if [ -z "$url" ]; then
+        echo "ERROR: build $BUILD_NUMBER has no 'server:default' download" >&2
+        exit 1
+    fi
+
+    curl -fSL -A "$USER_AGENT" -o paper.jar "$url"
+
+    if [ -n "$sha" ]; then
+        echo "verifying checksum"
+        echo "$sha  paper.jar" | sha256sum -c - \
+            || { echo "ERROR: paper.jar checksum mismatch" >&2; exit 1; }
+    fi
+
+    # same filesystem as the data volume, so a failed update can't leave a partial jar
+    mv paper.jar "$MINECRAFT_HOME/paper.jar"
+    echo "$MINECRAFT_VERSION" > "$VERSION_FILE"
+}
+
+# true if going from version $1 to $2 moves backwards (pre-release suffixes are ignored)
+is_downgrade() {
+    local from="${1%%-*}" to="${2%%-*}"
+    [ "$from" != "$to" ] && [ "$(printf '%s\n%s\n' "$from" "$to" | sort -V | head -n1)" = "$to" ]
+}
+
+# true if paper.jar must be (re)downloaded; exits rather than downgrade a world
+paper_needed() {
+    [ -f "$MINECRAFT_HOME/paper.jar" ] || return 0
+    if [ ! -f "$VERSION_FILE" ]; then
+        echo "WARNING: installed paper version unknown; downloading $MINECRAFT_VERSION" >&2
+        return 0
+    fi
+
+    local installed
+    installed=$(cat "$VERSION_FILE")
+    [ "$installed" = "$MINECRAFT_VERSION" ] && return 1
+
+    if is_downgrade "$installed" "$MINECRAFT_VERSION" && [ "$ALLOW_DOWNGRADE" != "true" ]; then
+        echo "ERROR: refusing to downgrade from $installed to $MINECRAFT_VERSION; this can damage the world." >&2
+        echo "back up the data volume and set ALLOW_DOWNGRADE=true to override." >&2
+        exit 1
+    fi
+    echo "changing paper version from $installed to $MINECRAFT_VERSION"
 }
 
 write_eula() {
     echo 'writing eula'
-    cd $MINECRAFT_HOME
-    echo "eula=$EULA" > $MINECRAFT_HOME/eula.txt
+    echo "eula=$EULA" > "$MINECRAFT_HOME/eula.txt"
+}
+
+# true if $1 is a 32-hex-char UUID (with or without dashes)
+is_uuid() {
+    local s="${1//-/}"
+    [[ "$s" =~ ^[0-9a-fA-F]{32}$ ]]
+}
+
+# normalize a (possibly dashless) UUID to lowercase 8-4-4-4-12 form
+dash_uuid() {
+    local s
+    s="$(echo "${1//-/}" | tr '[:upper:]' '[:lower:]')"
+    echo "${s:0:8}-${s:8:4}-${s:12:4}-${s:16:4}-${s:20:12}"
+}
+
+# resolve a Minecraft username to "<dashed-uuid> <canonical-name>" via Mojang, or fail
+resolve_uuid() {
+    local resp id name
+    resp=$(curl -fsSL "https://api.mojang.com/users/profiles/minecraft/$1") || return 1
+    id=$(echo "$resp" | jq -r '.id // empty')
+    name=$(echo "$resp" | jq -r '.name // empty')
+    [ -n "$id" ] || return 1
+    echo "$(dash_uuid "$id") $name"
+}
+
+# update ops.json from the OPS env var (comma-separated usernames and/or UUIDs).
+# $MANAGED_OPS_FILE records which UUIDs came from OPS, so removing someone from OPS
+# deops them while admins added in-game with /op are left alone.
+write_ops() {
+    local ops_file="$MINECRAFT_HOME/ops.json"
+    local managed_file="$MINECRAFT_HOME/.ops-managed"
+    if [ -z "$OPS" ] && [ ! -f "$managed_file" ]; then
+        echo "no OPS set; skipping op configuration"
+        return 0
+    fi
+    echo "updating ops.json from OPS='$OPS' (level $OP_LEVEL)"
+
+    local existing="[]" previous="[]" managed="[]" entries raw entry uuid name resolved
+    [ -s "$ops_file" ] && existing=$(cat "$ops_file")
+    [ -s "$managed_file" ] && previous=$(cat "$managed_file")
+    entries=$(echo "$existing" | jq --argjson previous "$previous" \
+        'map(select(.uuid as $uuid | $previous | index($uuid) | not))')
+
+    local items=()
+    IFS=',' read -ra items <<< "$OPS"
+    for raw in "${items[@]}"; do
+        entry="$(echo "$raw" | xargs)"   # trim whitespace
+        [ -z "$entry" ] && continue
+        if is_uuid "$entry"; then
+            uuid="$(dash_uuid "$entry")"
+            name=""
+        elif resolved=$(resolve_uuid "$entry"); then
+            uuid="${resolved%% *}"
+            name="${resolved#* }"
+        else
+            # e.g. Mojang is down: don't lock out an admin we already know about
+            uuid=$(echo "$existing" | jq -r --arg name "$entry" \
+                'map(select((.name // "" | ascii_downcase) == ($name | ascii_downcase))) | first | .uuid // empty')
+            name="$entry"
+            if [ -z "$uuid" ]; then
+                echo "  WARNING: could not resolve '$entry' to a UUID; skipping" >&2
+                continue
+            fi
+            echo "  WARNING: could not resolve '$entry'; keeping existing op entry" >&2
+        fi
+        echo "  op: ${name:-$uuid} ($uuid) level $OP_LEVEL"
+        entries=$(echo "$entries" | jq \
+            --arg uuid "$uuid" --arg name "$name" --argjson level "$OP_LEVEL" \
+            'map(select(.uuid != $uuid)) + [{uuid:$uuid, name:$name, level:$level, bypassesPlayerLimit:false}]')
+        managed=$(echo "$managed" | jq --arg uuid "$uuid" '. + [$uuid]')
+    done
+
+    echo "$entries" > "$ops_file"
+    echo "$managed" > "$managed_file"
 }
 
 cleanup() {
-    echo 'cleaning up' && \
-    rm -rf $TEMP_DIR
+    echo 'cleaning up'
+    rm -rf "$TEMP_DIR"
 }
 
 echo 'executing script'
 
-if [ ! -f "$MINECRAFT_HOME/paper.jar" ]; then
-    cp /server.properties $MINECRAFT_HOME
-    echo $DEFAULT_OP > $MINECRAFT_HOME/ops.txt
-    get_paper && \
+if [ "$EULA" != "true" ]; then
+    echo "ERROR: set EULA=true to accept the Minecraft EULA: https://aka.ms/MinecraftEULA" >&2
+    exit 1
+fi
+if [ -z "$MINECRAFT_VERSION" ]; then
+    echo "ERROR: MINECRAFT_VERSION is not set" >&2
+    exit 1
+fi
+
+if [ ! -f "$MINECRAFT_HOME/server.properties" ]; then
+    cp /server.properties "$MINECRAFT_HOME"
+fi
+
+if paper_needed; then
+    get_paper
     cleanup
 fi
 
 write_eula
+write_ops   # runs every start, so editing OPS + restart updates admins
+
+# Aikar's flags: G1GC tuning Paper recommends for smoother performance.
+# https://docs.papermc.io/paper/aikars-flags
+AIKARS_FLAGS=(
+    -XX:+UseG1GC -XX:+ParallelRefProcEnabled -XX:MaxGCPauseMillis=200
+    -XX:+UnlockExperimentalVMOptions -XX:+DisableExplicitGC -XX:+AlwaysPreTouch
+    -XX:G1NewSizePercent=30 -XX:G1MaxNewSizePercent=40 -XX:G1HeapRegionSize=8M
+    -XX:G1ReservePercent=20 -XX:G1HeapWastePercent=5 -XX:G1MixedGCCountTarget=4
+    -XX:InitiatingHeapOccupancyPercent=15 -XX:G1MixedGCLiveThresholdPercent=90
+    -XX:G1RSetUpdatingPauseTimePercent=5 -XX:SurvivorRatio=32
+    -XX:+PerfDisableSharedMem -XX:MaxTenuringThreshold=1
+    -Dusing.aikars.flags=https://mcflags.emc.gs -Daikars.new.flags=true
+)
+
+JVM_OPTS=(-Xms"${JAVA_MEMORY}" -Xmx"${JAVA_MEMORY}")
+if [ "$USE_AIKARS_FLAGS" = "true" ]; then
+    JVM_OPTS+=("${AIKARS_FLAGS[@]}")
+fi
 
 echo "starting up paper server"
-java -Xms2G -Xmx2G -jar $MINECRAFT_HOME/paper.jar --nogui
+cd "$MINECRAFT_HOME"
+# exec so java becomes PID 1 and receives SIGTERM from `docker stop` for a clean world save
+exec java "${JVM_OPTS[@]}" -jar "$MINECRAFT_HOME/paper.jar" --nogui

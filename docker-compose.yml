@@ -1,0 +1,23 @@
+services:
+  minecraft:
+    build: .
+    container_name: mc
+    ports:
+      - "25565:25565"
+    volumes:
+      - "C:/Users/gehse/Downloads/minecraft-data:/opt/minecraft"
+    environment:
+      # set EULA=true in your shell or a .env file to accept the Minecraft EULA.
+      EULA: "${EULA:-false}"
+      MINECRAFT_VERSION: "26.2"
+      JAVA_MEMORY: "2G"
+      # comma-separated Minecraft usernames and/or UUIDs to grant admin (op).
+      # set this to your own username, then `docker compose up`.
+      OPS: "gehsekky"
+      OP_LEVEL: "4"
+      USE_AIKARS_FLAGS: "true"
+    stdin_open: true
+    tty: true
+    restart: unless-stopped
+    # give the server time to finish saving the world before it gets killed
+    stop_grace_period: 120s
