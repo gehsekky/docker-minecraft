@@ -3,7 +3,7 @@ FROM docker.io/eclipse-temurin:25-jre
 ENV MINECRAFT_VERSION=26.3 \
     JAVA_MEMORY=2G \
     OP_LEVEL=4 \
-    USE_AIKARS_FLAGS=true
+    USE_RECOMMENDED_FLAGS=true
 
 # install necessary libs
 RUN apt-get update && \

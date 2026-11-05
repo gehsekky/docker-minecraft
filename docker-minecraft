@@ -9,13 +9,16 @@ MINECRAFT_VERSION=${MINECRAFT_VERSION:-}
 JAVA_MEMORY=${JAVA_MEMORY:-2G}
 OPS=${OPS:-}
 OP_LEVEL=${OP_LEVEL:-4}
-USE_AIKARS_FLAGS=${USE_AIKARS_FLAGS:-true}
+PAPER_BUILD=${PAPER_BUILD:-}
+USE_RECOMMENDED_FLAGS=${USE_RECOMMENDED_FLAGS:-true}
 ALLOW_DOWNGRADE=${ALLOW_DOWNGRADE:-false}
 # Fill (v3) requires a non-generic User-Agent identifying the software + a contact.
 USER_AGENT=${USER_AGENT:-"docker-minecraft/1.0 (https://github.com/gehsekky/docker-minecraft)"}
 PAPER_API="https://fill.papermc.io/v3/projects/paper"
 TEMP_DIR="$MINECRAFT_HOME/temp"
 VERSION_FILE="$MINECRAFT_HOME/.paper-version"
+BUILD_FILE="$MINECRAFT_HOME/.paper-build"
+FLAGS_FILE="$MINECRAFT_HOME/.paper-jvm-flags"
 BACKUP_DIR="$MINECRAFT_HOME/backups"
 
 get_paper() {
@@ -26,11 +29,15 @@ get_paper() {
     local builds build url sha
     builds=$(curl -fsSL -A "$USER_AGENT" "${PAPER_API}/versions/${MINECRAFT_VERSION}/builds")
 
-    # newest STABLE build, falling back to the newest build overall
-    # (a brand-new version may only have ALPHA/BETA builds for a while)
-    build=$(echo "$builds" | jq -c 'sort_by(.id) | (map(select(.channel == "STABLE")) | last) // last')
+    if [ -n "$PAPER_BUILD" ]; then
+        build=$(echo "$builds" | jq -c --arg id "$PAPER_BUILD" 'map(select((.id | tostring) == $id)) | first')
+    else
+        # newest STABLE build, falling back to the newest build overall
+        # (a brand-new version may only have ALPHA/BETA builds for a while)
+        build=$(echo "$builds" | jq -c 'sort_by(.id) | (map(select(.channel == "STABLE")) | last) // last')
+    fi
     if [ -z "$build" ] || [ "$build" = "null" ]; then
-        echo "ERROR: no Paper builds found for version '$MINECRAFT_VERSION'" >&2
+        echo "ERROR: no Paper build found for version '$MINECRAFT_VERSION' (PAPER_BUILD='$PAPER_BUILD')" >&2
         exit 1
     fi
 
@@ -58,6 +65,17 @@ get_paper() {
     # same filesystem as the data volume, so a failed update can't leave a partial jar
     mv paper.jar "$MINECRAFT_HOME/paper.jar"
     echo "$MINECRAFT_VERSION" > "$VERSION_FILE"
+    echo "$BUILD_NUMBER" > "$BUILD_FILE"
+    rm -f "$FLAGS_FILE"   # may differ by version; fetched again before startup
+}
+
+# save Paper's recommended JVM flags for this version, so restarts don't need the network
+fetch_jvm_flags() {
+    local flags
+    flags=$(curl -fsSL -A "$USER_AGENT" "${PAPER_API}/versions/${MINECRAFT_VERSION}" \
+        | jq -r '.version.java.flags.recommended // [] | .[]') || return 1
+    [ -n "$flags" ] || return 1
+    echo "$flags" > "$FLAGS_FILE"
 }
 
 # snapshot the data volume before replacing paper.jar. keeps the old jar and version record
@@ -91,9 +109,16 @@ paper_needed() {
         return 0
     fi
 
-    local installed
+    local installed installed_build=""
     installed=$(cat "$VERSION_FILE")
-    [ "$installed" = "$MINECRAFT_VERSION" ] && return 1
+    [ -f "$BUILD_FILE" ] && installed_build=$(cat "$BUILD_FILE")
+    if [ "$installed" = "$MINECRAFT_VERSION" ]; then
+        if [ -z "$PAPER_BUILD" ] || [ "$installed_build" = "$PAPER_BUILD" ]; then
+            return 1
+        fi
+        echo "changing paper build from ${installed_build:-unknown} to $PAPER_BUILD"
+        return 0
+    fi
 
     if is_downgrade "$installed" "$MINECRAFT_VERSION" && [ "$ALLOW_DOWNGRADE" != "true" ]; then
         echo "ERROR: refusing to downgrade from $installed to $MINECRAFT_VERSION; this can damage the world." >&2
@@ -210,22 +235,15 @@ fi
 write_eula
 write_ops   # runs every start, so editing OPS + restart updates admins
 
-# Aikar's flags: G1GC tuning Paper recommends for smoother performance.
-# https://docs.papermc.io/paper/aikars-flags
-AIKARS_FLAGS=(
-    -XX:+UseG1GC -XX:+ParallelRefProcEnabled -XX:MaxGCPauseMillis=200
-    -XX:+UnlockExperimentalVMOptions -XX:+DisableExplicitGC -XX:+AlwaysPreTouch
-    -XX:G1NewSizePercent=30 -XX:G1MaxNewSizePercent=40 -XX:G1HeapRegionSize=8M
-    -XX:G1ReservePercent=20 -XX:G1HeapWastePercent=5 -XX:G1MixedGCCountTarget=4
-    -XX:InitiatingHeapOccupancyPercent=15 -XX:G1MixedGCLiveThresholdPercent=90
-    -XX:G1RSetUpdatingPauseTimePercent=5 -XX:SurvivorRatio=32
-    -XX:+PerfDisableSharedMem -XX:MaxTenuringThreshold=1
-    -Dusing.aikars.flags=https://mcflags.emc.gs -Daikars.new.flags=true
-)
-
 JVM_OPTS=(-Xms"${JAVA_MEMORY}" -Xmx"${JAVA_MEMORY}")
-if [ "$USE_AIKARS_FLAGS" = "true" ]; then
-    JVM_OPTS+=("${AIKARS_FLAGS[@]}")
+if [ "$USE_RECOMMENDED_FLAGS" = "true" ]; then
+    # the server runs fine without these, so don't let an API outage stop it starting
+    if [ -s "$FLAGS_FILE" ] || fetch_jvm_flags; then
+        readarray -t RECOMMENDED_FLAGS < "$FLAGS_FILE"
+        JVM_OPTS+=("${RECOMMENDED_FLAGS[@]}")
+    else
+        echo "WARNING: could not fetch Paper's recommended JVM flags; starting without them" >&2
+    fi
 fi
 
 echo "starting up paper server"

@@ -11,11 +11,12 @@ a simple tool for setting up a paper minecraft server in a docker container. it'
 | --- | --- | --- |
 | `EULA` | `false` | must be set to `true` to accept the [Minecraft EULA](https://aka.ms/MinecraftEULA); the server won't start otherwise |
 | `MINECRAFT_VERSION` | `26.3` | Minecraft version to fetch the latest Paper build for. changing it downloads that version on the next start |
+| `PAPER_BUILD` | _(empty)_ | Paper build number to install. if empty, the newest stable build is installed when the version is first set up and then kept until you change `MINECRAFT_VERSION` or set this. changing it makes a backup and downloads that build on the next start |
 | `ALLOW_DOWNGRADE` | `false` | allow changing to an older `MINECRAFT_VERSION`, which can damage the world. back up first |
 | `JAVA_MEMORY` | `2G` | heap size, used for both `-Xms` and `-Xmx` |
 | `OPS` | _(empty)_ | comma-separated Minecraft usernames and/or UUIDs to grant admin (op) |
 | `OP_LEVEL` | `4` | op permission level for everyone in `OPS` (4 = full admin) |
-| `USE_AIKARS_FLAGS` | `true` | apply [Aikar's JVM flags](https://docs.papermc.io/paper/aikars-flags) for performance |
+| `USE_RECOMMENDED_FLAGS` | `true` | apply the JVM flags Paper recommends for this Minecraft version, fetched from the [Fill API](https://fill.papermc.io) and saved in the data volume |
 | `USER_AGENT` | `docker-minecraft/1.0 (https://github.com/gehsekky/docker-minecraft)` | User-Agent sent to the PaperMC [Fill API](https://fill.papermc.io); must be non-generic and include a contact |
 
 ### admin access

@@ -13,7 +13,8 @@ services:
       JAVA_MEMORY: "${JAVA_MEMORY:-2G}"
       OPS: "${OPS:-}"
       OP_LEVEL: "${OP_LEVEL:-4}"
-      USE_AIKARS_FLAGS: "${USE_AIKARS_FLAGS:-true}"
+      PAPER_BUILD: "${PAPER_BUILD:-}"
+      USE_RECOMMENDED_FLAGS: "${USE_RECOMMENDED_FLAGS:-true}"
       ALLOW_DOWNGRADE: "${ALLOW_DOWNGRADE:-false}"
     stdin_open: true
     tty: true
