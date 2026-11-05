@@ -1,2 +1,6 @@
 # Auto detect text files and perform LF normalization
 * text=auto
+
+# these get copied into a Linux container, so never check them out as CRLF
+docker-minecraft text eol=lf
+server.properties text eol=lf

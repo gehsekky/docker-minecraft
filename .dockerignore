@@ -3,3 +3,6 @@
 README.md
 docker-compose.yml
 docker-minecraft-data
+.env
+.env.example
+.gitignore

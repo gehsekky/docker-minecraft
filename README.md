@@ -10,7 +10,7 @@ a simple tool for setting up a paper minecraft server in a docker container. it'
 | variable | default | description |
 | --- | --- | --- |
 | `EULA` | `false` | must be set to `true` to accept the [Minecraft EULA](https://aka.ms/MinecraftEULA); the server won't start otherwise |
-| `MINECRAFT_VERSION` | `1.21.4` | Minecraft version to fetch the latest Paper build for. changing it downloads that version on the next start |
+| `MINECRAFT_VERSION` | `26.3` | Minecraft version to fetch the latest Paper build for. changing it downloads that version on the next start |
 | `ALLOW_DOWNGRADE` | `false` | allow changing to an older `MINECRAFT_VERSION`, which can damage the world. back up first |
 | `JAVA_MEMORY` | `2G` | heap size, used for both `-Xms` and `-Xmx` |
 | `OPS` | _(empty)_ | comma-separated Minecraft usernames and/or UUIDs to grant admin (op) |
@@ -28,11 +28,14 @@ a simple tool for setting up a paper minecraft server in a docker container. it'
 
 ### usage with docker compose (recommended)
 
+copy `.env.example` to `.env`, set `EULA=true`, and add your username to `OPS`. then:
+
 ```shell
-echo "EULA=true" >> .env
 docker compose up -d --build
 docker compose logs --follow
 ```
+
+* the world and all other server data live in `./docker-minecraft-data`. set `MINECRAFT_DATA` in `.env` to keep them somewhere else.
 
 * stop: `docker compose stop`
 * start a stopped instance: `docker compose start`
@@ -42,7 +45,7 @@ docker compose logs --follow
 
 ```shell
 docker build -t docker-minecraft .
-docker run -d -p 25565:25565 -e EULA=true --stop-timeout 120 -v "C:/docker-minecraft-data:/opt/minecraft" --name mc docker-minecraft
+docker run -d -p 25565:25565 -e EULA=true --stop-timeout 120 -v "${PWD}/docker-minecraft-data:/opt/minecraft" --name mc docker-minecraft
 docker logs --follow mc
 ```
 

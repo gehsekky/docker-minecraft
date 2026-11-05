@@ -1,6 +1,6 @@
-FROM eclipse-temurin:25-jre
+FROM docker.io/eclipse-temurin:25-jre
 
-ENV MINECRAFT_VERSION=26.2 \
+ENV MINECRAFT_VERSION=26.3 \
     JAVA_MEMORY=2G \
     OP_LEVEL=4 \
     USE_AIKARS_FLAGS=true
@@ -10,19 +10,17 @@ RUN apt-get update && \
     apt-get install -y --no-install-recommends \
     ca-certificates \
     curl \
-    dos2unix \
     jq && \
     rm -rf /var/lib/apt/lists/*
 
 RUN useradd -m -d /home/mcuser -s /bin/bash mcuser
 
-# copy over local files to container and sanitize
+# copy over local files to container
 COPY docker-minecraft server.properties /
 
 RUN chmod 755 /docker-minecraft && \
     chmod 644 /server.properties && \
     chown mcuser:mcuser /docker-minecraft /server.properties && \
-    dos2unix /docker-minecraft /server.properties && \
     mkdir -p /opt/minecraft && \
     chown -R mcuser:mcuser /opt/minecraft
 
