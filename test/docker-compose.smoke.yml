@@ -4,7 +4,6 @@ services:
     container_name: mc-smoke
     ports: !override
       - "25599:25565"
-    restart: "no"
 
 volumes:
   mc-smoke-data:

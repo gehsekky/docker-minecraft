@@ -18,7 +18,7 @@ services:
       ALLOW_DOWNGRADE: "${ALLOW_DOWNGRADE:-false}"
     stdin_open: true
     tty: true
-    restart: unless-stopped
+    restart: "no"
     # the JVM uses well over its heap; keep this about 2G above JAVA_MEMORY.
     mem_limit: "${MEMORY_LIMIT:-4G}"
     # give the server time to finish saving the world before it gets killed
